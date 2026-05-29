@@ -1,6 +1,5 @@
 import os
 import logging
-import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, ConversationHandler, CommandHandler
 from mutagen import File as MutagenFile
@@ -11,10 +10,95 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-HF_TOKEN = os.environ.get("HF_TOKEN")
 CHANNEL_USERNAME = "AstralChords"
 
 WAITING_FOR_INFO = 1
+
+# Genre database
+ARTIST_GENRES = {
+    # Metal
+    "metallica": ["#HeavyMetal", "#ThrashMetal", "#HardRock", "#MetalClassics"],
+    "black sabbath": ["#HeavyMetal", "#DoomMetal", "#ClassicRock", "#MetalOrigins"],
+    "iron maiden": ["#HeavyMetal", "#BritishMetal", "#PowerMetal", "#ClassicMetal"],
+    "slayer": ["#ThrashMetal", "#HeavyMetal", "#SpeedMetal", "#DeathmMetal"],
+    "megadeth": ["#ThrashMetal", "#HeavyMetal", "#SpeedMetal", "#MetalClassics"],
+    "pantera": ["#GrooveMetal", "#HeavyMetal", "#ThrashMetal", "#HardRock"],
+    "tool": ["#ProgressiveMetal", "#AlternativeMetal", "#HeavyMetal", "#ArtRock"],
+    "system of a down": ["#AlternativeMetal", "#HeavyMetal", "#NuMetal", "#ProgressiveRock"],
+    "rammstein": ["#IndustrialMetal", "#HeavyMetal", "#GermanMetal", "#NeueDeutscheHärte"],
+    "marilyn manson": ["#IndustrialMetal", "#GothicRock", "#ShockRock", "#AlternativeMetal"],
+    "nine inch nails": ["#IndustrialRock", "#AlternativeRock", "#ElectronicRock", "#DarkWave"],
+    "korn": ["#NuMetal", "#AlternativeMetal", "#HeavyMetal", "#GrooveMetal"],
+    "linkin park": ["#NuMetal", "#AlternativeRock", "#RapRock", "#PopRock"],
+    "slipknot": ["#NuMetal", "#HeavyMetal", "#AlternativeMetal", "#GrooveMetal"],
+    "disturbed": ["#NuMetal", "#HeavyMetal", "#AlternativeMetal", "#HardRock"],
+    "a7x": ["#HeavyMetal", "#MetalCore", "#HardRock", "#ProgressiveMetal"],
+    "avenged sevenfold": ["#HeavyMetal", "#MetalCore", "#HardRock", "#ProgressiveMetal"],
+    "falling in reverse": ["#PostHardcore", "#MetalCore", "#AlternativeMetal", "#HardRock"],
+    # Rock
+    "radiohead": ["#AlternativeRock", "#ArtRock", "#ExperimentalRock", "#PostRock"],
+    "pink floyd": ["#ProgressiveRock", "#PsychedelicRock", "#ArtRock", "#ClassicRock"],
+    "led zeppelin": ["#HardRock", "#ClassicRock", "#BluesRock", "#HeavyMetal"],
+    "the doors": ["#PsychedelicRock", "#ClassicRock", "#BluesRock", "#ArtRock"],
+    "nirvana": ["#Grunge", "#AlternativeRock", "#IndieRock", "#HardRock"],
+    "pearl jam": ["#Grunge", "#AlternativeRock", "#HardRock", "#ClassicRock"],
+    "soundgarden": ["#Grunge", "#AlternativeRock", "#HardRock", "#PsychedelicRock"],
+    "alice in chains": ["#Grunge", "#HeavyMetal", "#AlternativeRock", "#DoomMetal"],
+    "the smashing pumpkins": ["#AlternativeRock", "#Grunge", "#IndieRock", "#GothicRock"],
+    "david bowie": ["#GlamRock", "#ArtRock", "#NewWave", "#ClassicRock"],
+    "queen": ["#ClassicRock", "#GlamRock", "#HardRock", "#ArtRock"],
+    "the rolling stones": ["#ClassicRock", "#BluesRock", "#HardRock", "#BritishRock"],
+    "the beatles": ["#ClassicRock", "#BritishRock", "#PsychedelicRock", "#PopRock"],
+    "u2": ["#AlternativeRock", "#PostPunk", "#NewWave", "#PopRock"],
+    "coldplay": ["#AlternativeRock", "#BritPop", "#PostBritPop", "#IndieRock"],
+    "muse": ["#AlternativeRock", "#ProgressiveRock", "#SpaceRock", "#ArtRock"],
+    "oscar and the wolf": ["#DreamPop", "#ElectroPop", "#AlternativeMusic", "#EmotionalElectronic"],
+    "the white buffalo": ["#DarkFolk", "#SouthernGothic", "#FolkRock", "#DarkAtmosphere"],
+    "white buffalo": ["#DarkFolk", "#SouthernGothic", "#FolkRock", "#DarkAtmosphere"],
+}
+
+KEYWORD_GENRES = {
+    "metal": ["#HeavyMetal", "#Metal", "#HardRock", "#MetalCore"],
+    "rock": ["#Rock", "#AlternativeRock", "#HardRock", "#ClassicRock"],
+    "punk": ["#PunkRock", "#HardcorePunk", "#PostPunk", "#AlternativeRock"],
+    "grunge": ["#Grunge", "#AlternativeRock", "#HardRock", "#IndieRock"],
+    "indie": ["#IndieRock", "#AlternativeRock", "#IndiePop", "#DreamPop"],
+    "dark": ["#DarkRock", "#GothicRock", "#DarkWave", "#PostPunk"],
+    "death": ["#DeathMetal", "#HeavyMetal", "#BrutalMetal", "#ExtremeMetal"],
+    "black": ["#BlackMetal", "#HeavyMetal", "#ExtremeMetal", "#AtmosphericMetal"],
+    "doom": ["#DoomMetal", "#SlowMetal", "#HeavyMetal", "#DarkMetal"],
+    "progressive": ["#ProgressiveRock", "#ProgressiveMetal", "#ArtRock", "#ExperimentalRock"],
+    "psychedelic": ["#PsychedelicRock", "#ExperimentalRock", "#ArtRock", "#SpaceRock"],
+    "folk": ["#FolkRock", "#AcousticRock", "#AlternativeFolk", "#Americana"],
+    "blues": ["#BluesRock", "#ClassicBlues", "#HardRock", "#SouthernRock"],
+    "industrial": ["#IndustrialRock", "#IndustrialMetal", "#ElectronicRock", "#DarkWave"],
+    "gothic": ["#GothicRock", "#DarkWave", "#PostPunk", "#DarkRock"],
+    "classic": ["#ClassicRock", "#HardRock", "#VintageRock", "#RockNRoll"],
+    "alternative": ["#AlternativeRock", "#IndieRock", "#PostRock", "#ModernRock"],
+    "hardcore": ["#Hardcore", "#PostHardcore", "#MetalCore", "#PunkRock"],
+    "thrash": ["#ThrashMetal", "#HeavyMetal", "#SpeedMetal", "#AggressiveMetal"],
+    "power": ["#PowerMetal", "#HeavyMetal", "#EpicMetal", "#SpeedMetal"],
+}
+
+DEFAULT_GENRES = ["#AlternativeRock", "#IndieRock", "#HardRock", "#ModernRock"]
+
+
+def get_genres(artist, title):
+    artist_lower = artist.lower().strip()
+    title_lower = title.lower().strip()
+
+    # Check artist database
+    for key, genres in ARTIST_GENRES.items():
+        if key in artist_lower or artist_lower in key:
+            return genres
+
+    # Check keywords in artist and title
+    combined = f"{artist_lower} {title_lower}"
+    for keyword, genres in KEYWORD_GENRES.items():
+        if keyword in combined:
+            return genres
+
+    return DEFAULT_GENRES
 
 
 def get_music_metadata(file_path):
@@ -49,55 +133,10 @@ def get_music_metadata(file_path):
         return None, None
 
 
-def generate_hashtags(artist, title):
-    prompt = f"""You are a music expert. Given the song "{title}" by "{artist}", identify 4-5 of the most accurate music genre hashtags.
-
-Rules:
-- Return ONLY the hashtags, one per line
-- No explanations, no extra text
-- Format: #GenreName (PascalCase, no spaces)
-- Example output:
-#AlternativeRock
-#GrungeRock
-#90sRock
-#IndieRock
-
-Now generate hashtags for "{title}" by "{artist}":"""
-
-    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
-
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-
-    response = requests.post(url, headers=headers, json={
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": 100, "return_full_text": False}
-    })
-
-    data = response.json()
-    logger.info(f"HF response: {data}")
-
-    if isinstance(data, list) and len(data) > 0:
-        text = data[0].get("generated_text", "")
-    elif isinstance(data, dict) and "error" in data:
-        raise Exception(f"HF API error: {data['error']}")
-    else:
-        raise Exception(f"Unexpected response: {data}")
-
-    # Extract only hashtag lines
-    lines = text.strip().split('\n')
-    hashtags = [l.strip() for l in lines if l.strip().startswith('#')]
-    return '\n'.join(hashtags[:5])
-
-
-def build_caption(hashtags):
-    lines = hashtags.strip().split('\n')
+def build_caption(genres):
     linked_lines = []
-
-    for line in lines:
-        tag = line.strip()
-        if tag.startswith('#'):
-            linked_lines.append(f'<a href="https://t.me/{CHANNEL_USERNAME}">{tag}</a>')
-
+    for tag in genres:
+        linked_lines.append(f'<a href="https://t.me/{CHANNEL_USERNAME}">{tag}</a>')
     caption = '\n'.join(linked_lines)
     caption += f'\n\n<a href="https://t.me/{CHANNEL_USERNAME}">φ</a>'
     return caption
@@ -148,10 +187,8 @@ async def process_song(update: Update, context: ContextTypes.DEFAULT_TYPE, artis
     msg = await update.message.reply_text(f"🎵 در حال پردازش: {title} - {artist}...")
 
     try:
-        hashtags = generate_hashtags(artist, title)
-        if not hashtags:
-            raise Exception("No hashtags generated")
-        caption = build_caption(hashtags)
+        genres = get_genres(artist, title)
+        caption = build_caption(genres)
 
         await msg.edit_text(
             f"✅ کپشن آماده شد!\n\n{caption}\n\n<code>{caption}</code>",
