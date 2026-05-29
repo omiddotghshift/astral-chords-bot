@@ -20,7 +20,7 @@ CHANNEL_USERNAME = "AstralChords"
 WAITING_FOR_INFO = 1
 
 # Anthropic client
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, http_client=None)
 
 def get_music_metadata(file_path):
     """Extract artist and title from audio file metadata."""
