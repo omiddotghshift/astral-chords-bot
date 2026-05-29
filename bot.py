@@ -1,55 +1,48 @@
+cat > /home/claude/bot_new.py << 'EOF'
 import os
 import logging
-import anthropic
+import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, ConversationHandler, CommandHandler
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3NoHeaderError
 import tempfile
+import traceback
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 CHANNEL_USERNAME = "AstralChords"
 
-# States
 WAITING_FOR_INFO = 1
 
-# Anthropic client
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, http_client=None)
 
 def get_music_metadata(file_path):
-    """Extract artist and title from audio file metadata."""
     try:
         audio = MutagenFile(file_path)
         if audio is None:
             return None, None
-        
         tags = audio.tags
         if tags is None:
             return None, None
 
-        # Try common tag formats
         artist = None
         title = None
 
-        # ID3 (MP3)
         if hasattr(tags, 'get'):
             artist = str(tags.get('TPE1', tags.get('artist', tags.get('Author', '')))).strip() or None
             title = str(tags.get('TIT2', tags.get('title', tags.get('Title', '')))).strip() or None
-        
-        # Try as dict
-        if not artist and not title:
+
+        if not artist or not title:
             for key in tags.keys():
                 k = key.lower()
                 if 'artist' in k and not artist:
-                    artist = str(tags[key][0] if isinstance(tags[key], list) else tags[key]).strip()
+                    val = tags[key]
+                    artist = str(val[0] if isinstance(val, list) else val).strip()
                 if 'title' in k and not title:
-                    title = str(tags[key][0] if isinstance(tags[key], list) else tags[key]).strip()
+                    val = tags[key]
+                    title = str(val[0] if isinstance(val, list) else val).strip()
 
         return artist or None, title or None
     except Exception as e:
@@ -58,14 +51,12 @@ def get_music_metadata(file_path):
 
 
 def generate_hashtags(artist, title):
-    """Use Claude to generate genre hashtags."""
     prompt = f"""You are a music expert. Given the song "{title}" by "{artist}", identify 4-5 of the most accurate music genre hashtags.
 
 Rules:
 - Return ONLY the hashtags, one per line
 - No explanations, no extra text
 - Format: #GenreName (PascalCase, no spaces)
-- Focus on the most specific and accurate genres
 - Example output:
 #AlternativeRock
 #GrungeRock
@@ -74,66 +65,57 @@ Rules:
 
 Now generate hashtags for "{title}" by "{artist}":"""
 
-    message = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=200,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
-    return message.content[0].text.strip()
+    response = requests.post(url, json={
+        "contents": [{"parts": [{"text": prompt}]}]
+    })
+    
+    data = response.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 def build_caption(hashtags):
-    """Build the final caption with linked hashtags and phi symbol."""
     lines = hashtags.strip().split('\n')
     linked_lines = []
     
     for line in lines:
         tag = line.strip()
         if tag.startswith('#'):
-            # Make hashtag link to channel
             linked_lines.append(f'<a href="https://t.me/{CHANNEL_USERNAME}">{tag}</a>')
     
     caption = '\n'.join(linked_lines)
     caption += f'\n\n<a href="https://t.me/{CHANNEL_USERNAME}">φ</a>'
-    
     return caption
 
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming audio files."""
     message = update.message
     audio = message.audio or message.document
     
     if not audio:
         return
     
-    # Download the file
     file = await context.bot.get_file(audio.file_id)
     
     with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
         tmp_path = tmp.name
     
     await file.download_to_drive(tmp_path)
-    
-    # Extract metadata
     artist, title = get_music_metadata(tmp_path)
     os.unlink(tmp_path)
     
     if artist and title:
-        # We have the info, generate caption
         await process_song(update, context, artist, title)
     else:
-        # Ask user for info
-        context.user_data['pending_audio_id'] = audio.file_id
+        context.user_data['pending'] = True
         await message.reply_text(
-            "❓ نتونستم اطلاعات آهنگ رو از فایل بخونم.\n\nلطفاً اسم آهنگ و خواننده رو بفرست:\n(مثال: Radiohead - Man of War)"
+            "❓ نتونستم اطلاعات آهنگ رو بخونم.\n\nلطفاً اسم آهنگ و خواننده رو بفرست:\n(مثال: Radiohead - Man of War)"
         )
         return WAITING_FOR_INFO
 
 
 async def handle_manual_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle manually entered song info."""
     text = update.message.text.strip()
     
     if ' - ' in text:
@@ -141,7 +123,7 @@ async def handle_manual_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
         artist = parts[0].strip()
         title = parts[1].strip()
     else:
-        await update.message.reply_text("❌ فرمت اشتباهه. لطفاً اینطوری بنویس:\nRadiohead - Man of War")
+        await update.message.reply_text("❌ فرمت اشتباهه:\nRadiohead - Man of War")
         return WAITING_FOR_INFO
     
     await process_song(update, context, artist, title)
@@ -149,7 +131,6 @@ async def handle_manual_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def process_song(update: Update, context: ContextTypes.DEFAULT_TYPE, artist: str, title: str):
-    """Generate and send caption for a song."""
     msg = await update.message.reply_text(f"🎵 در حال پردازش: {title} - {artist}...")
     
     try:
@@ -161,7 +142,7 @@ async def process_song(update: Update, context: ContextTypes.DEFAULT_TYPE, artis
             parse_mode='HTML'
         )
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error: {e}\n{traceback.format_exc()}")
         await msg.edit_text("❌ خطایی پیش اومد. دوباره امتحان کن.")
 
 
@@ -191,3 +172,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+EOF
+echo "Done"
