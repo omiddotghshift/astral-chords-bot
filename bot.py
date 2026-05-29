@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 CHANNEL_USERNAME = "AstralChords"
 
 WAITING_FOR_INFO = 1
@@ -64,19 +64,29 @@ Rules:
 
 Now generate hashtags for "{title}" by "{artist}":"""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 
-    response = requests.post(url, json={
-        "contents": [{"parts": [{"text": prompt}]}]
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+    response = requests.post(url, headers=headers, json={
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 100, "return_full_text": False}
     })
 
     data = response.json()
-    logger.info(f"Gemini response: {data}")
+    logger.info(f"HF response: {data}")
 
-    if "candidates" not in data:
-        raise Exception(f"Gemini API error: {data}")
+    if isinstance(data, list) and len(data) > 0:
+        text = data[0].get("generated_text", "")
+    elif isinstance(data, dict) and "error" in data:
+        raise Exception(f"HF API error: {data['error']}")
+    else:
+        raise Exception(f"Unexpected response: {data}")
 
-    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    # Extract only hashtag lines
+    lines = text.strip().split('\n')
+    hashtags = [l.strip() for l in lines if l.strip().startswith('#')]
+    return '\n'.join(hashtags[:5])
 
 
 def build_caption(hashtags):
@@ -139,6 +149,8 @@ async def process_song(update: Update, context: ContextTypes.DEFAULT_TYPE, artis
 
     try:
         hashtags = generate_hashtags(artist, title)
+        if not hashtags:
+            raise Exception("No hashtags generated")
         caption = build_caption(hashtags)
 
         await msg.edit_text(
