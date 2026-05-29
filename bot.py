@@ -1,4 +1,3 @@
-cat > /home/claude/bot_new.py << 'EOF'
 import os
 import logging
 import requests
@@ -172,5 +171,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-EOF
-echo "Done"
