@@ -71,6 +71,9 @@ Now generate hashtags for "{title}" by "{artist}":"""
     })
     
     data = response.json()
+   if "candidates" not in data:
+        logger.error(f"Gemini error: {data}")
+        raise Exception(f"Gemini API error: {data}")
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
