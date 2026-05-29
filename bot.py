@@ -65,27 +65,29 @@ Rules:
 Now generate hashtags for "{title}" by "{artist}":"""
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    
+
     response = requests.post(url, json={
         "contents": [{"parts": [{"text": prompt}]}]
     })
-    
+
     data = response.json()
-   if "candidates" not in data:
-        logger.error(f"Gemini error: {data}")
+    logger.info(f"Gemini response: {data}")
+
+    if "candidates" not in data:
         raise Exception(f"Gemini API error: {data}")
+
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 def build_caption(hashtags):
     lines = hashtags.strip().split('\n')
     linked_lines = []
-    
+
     for line in lines:
         tag = line.strip()
         if tag.startswith('#'):
             linked_lines.append(f'<a href="https://t.me/{CHANNEL_USERNAME}">{tag}</a>')
-    
+
     caption = '\n'.join(linked_lines)
     caption += f'\n\n<a href="https://t.me/{CHANNEL_USERNAME}">φ</a>'
     return caption
@@ -94,19 +96,19 @@ def build_caption(hashtags):
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     audio = message.audio or message.document
-    
+
     if not audio:
         return
-    
+
     file = await context.bot.get_file(audio.file_id)
-    
+
     with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
         tmp_path = tmp.name
-    
+
     await file.download_to_drive(tmp_path)
     artist, title = get_music_metadata(tmp_path)
     os.unlink(tmp_path)
-    
+
     if artist and title:
         await process_song(update, context, artist, title)
     else:
@@ -119,7 +121,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_manual_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    
+
     if ' - ' in text:
         parts = text.split(' - ', 1)
         artist = parts[0].strip()
@@ -127,18 +129,18 @@ async def handle_manual_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("❌ فرمت اشتباهه:\nRadiohead - Man of War")
         return WAITING_FOR_INFO
-    
+
     await process_song(update, context, artist, title)
     return ConversationHandler.END
 
 
 async def process_song(update: Update, context: ContextTypes.DEFAULT_TYPE, artist: str, title: str):
     msg = await update.message.reply_text(f"🎵 در حال پردازش: {title} - {artist}...")
-    
+
     try:
         hashtags = generate_hashtags(artist, title)
         caption = build_caption(hashtags)
-        
+
         await msg.edit_text(
             f"✅ کپشن آماده شد!\n\n{caption}\n\n<code>{caption}</code>",
             parse_mode='HTML'
@@ -156,7 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    
+
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.AUDIO | filters.Document.AUDIO, handle_audio)],
         states={
@@ -164,10 +166,10 @@ def main():
         },
         fallbacks=[],
     )
-    
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_handler)
-    
+
     logger.info("Bot started!")
     app.run_polling()
 
